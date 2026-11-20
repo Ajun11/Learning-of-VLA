@@ -97,6 +97,7 @@ class PiZero(nn.Module, NoSyncBase):
         self.flow_sig_min = cfg.get("flow_sig_min", 0.001)
 
         # text input only
+        # 
         self.embed_tokens = nn.Embedding(
             cfg.vocab_size,
             self.image_text_hidden_size,
@@ -104,15 +105,25 @@ class PiZero(nn.Module, NoSyncBase):
         )  # 0.527B parameters
 
         # Vision
+        # 创建视觉编码器和投影层‘
+        # 图像 ↓ vision_towe 图像特征 ↓ multi_modal_projecto 得到 维度与文本 embedding 对齐的图像特征
         self.vision_tower = hydra.utils.instantiate(cfg.vision)
         self.multi_modal_projector = hydra.utils.instantiate(cfg.vision_projector)
 
         # Mixtures
+        # TODO
+        # 这一步根据 cfg.joint 创建联合模型。它具体怎样组合视觉语言部分和动作部分，需要继续看 cfg.joint 指向的类及其 forward()。
+        # 这里的 Mixtures 不能单凭名字理解成常见的稀疏 MoE。它在这份实现里具体表示什么，要结合联合模型的实现判断。
         self.joint_model = hydra.utils.instantiate(cfg.joint)
 
         # Action, proprio, time encoders
+        # 图像和文本 transformer有自己的处理方式，动作和机器人状态也要有自己的处理方式
+        # proprio 是 proprioception 的缩写，意思是“本体感知”——机器人对自身状态的感知。
+
+        # 动作专家自适应模式，如果开启，则动作编码和时间分开走
         self.action_expert_adaptive_mode = cfg.action_expert_adaptive_mode
         if cfg.action_expert_adaptive_mode:  # adaLN or adaLN-Zero
+            # 如果自适应分支，
             self.action_encoder = ActionEncoder(
                 self.action_dim,
                 self.action_hidden_size,
@@ -121,6 +132,7 @@ class PiZero(nn.Module, NoSyncBase):
             self.time_embedding = SinusoidalPosEmb(
                 cfg.time_hidden_size, cfg.time_max_period
             )
+        # 如果关闭，则动作编码和时间拼接在一起
         else:  # matching pi0
             self.action_encoder = ActionEncoder(
                 self.action_dim,
@@ -130,6 +142,9 @@ class PiZero(nn.Module, NoSyncBase):
             self.time_embedding = SinusoidalPosEmb(
                 self.action_hidden_size, cfg.time_max_period
             )
+
+
+        # 状态编码器
         self.proprio_encoder = nn.Linear(
             self.proprio_dim,
             self.proprio_hidden_size,

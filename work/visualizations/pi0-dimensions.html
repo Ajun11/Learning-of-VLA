@@ -1,0 +1,65 @@
+<div id="pi0-dims">
+  <h2>π₀：动作分支的维度地图</h2>
+  <div class="text-small text-muted">初始值：config/train/bridge.yaml · B 为演示批大小</div>
+  <div class="viz-controls">
+    <label class="form-label">B · 同时处理的样本数<select class="form-select" data-key="b"><option>1</option><option selected>2</option><option>8</option></select></label>
+    <label class="form-label">H · 每个样本的动作步数<select class="form-select" data-key="h"><option selected>4</option><option>16</option><option>50</option></select></label>
+    <label class="form-label">A · 每步动作的数值个数<select class="form-select" data-key="a"><option selected>7</option><option>14</option><option>32</option></select></label>
+    <label class="form-label">D · 动作隐藏向量长度<select class="form-select" data-key="d"><option>256</option><option selected>1024</option><option>2048</option></select></label>
+    <label class="form-label">时间注入方式<select class="form-select" data-key="mode"><option value="input">π₀：在 ActionEncoder 拼接</option><option value="adaptive">Adaptive：在专家内部调节</option></select></label>
+  </div>
+  <div class="viz-row" id="pd-legend"></div>
+  <div id="pd-flow" aria-live="polite"></div>
+  <hr>
+  <div class="viz-row"><span>机器人状态</span><code id="pd-proprio"></code><span>→ proprio_encoder →</span><code id="pd-state"></code><span>↗ joint_model</span></div>
+  <hr>
+  <div class="viz-row"><span>所列动作输入／输出层参数</span><strong class="tabular-nums" id="pd-total"></strong></div>
+  <div class="text-small text-muted">不含 joint_model、自适应层、状态编码器、视觉与文本模块</div>
+  <div class="table-responsive"><table class="table table-sm"><thead><tr><th>模块</th><th>权重形状</th><th class="text-end">参数数（含偏置）</th></tr></thead><tbody id="pd-weights"></tbody></table></div>
+  <details><summary>图文分支的其他维度 · 当前配置</summary><div class="table-responsive"><table class="table table-sm"><thead><tr><th>模块</th><th>输入 → 输出</th></tr></thead><tbody><tr><td>embed_tokens</td><td>[B,L] → [B,L,2048]</td></tr><tr><td>vision_tower</td><td>[B,3,224,224] → [B,256,1152]</td></tr><tr><td>projector</td><td>[B,256,1152] → [B,256,2048]</td></tr><tr><td>可选 lm_head</td><td>[B,L,2048] → [B,L,257216]</td></tr></tbody></table></div><div class="text-small text-muted">L：文本长度；256：图像 patch 数；257216：词表大小；lm_head 与 embed_tokens 共享权重。</div></details>
+</div>
+<style>
+#pi0-dims {display:flex;flex-direction:column;gap:calc(var(--font-size-base)*1);color:var(--foreground)}
+#pi0-dims #pd-flow {display:flex;flex-direction:column;gap:calc(var(--font-size-base)*.5)}
+#pi0-dims .pd-stage {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:calc(var(--font-size-base)*.5);align-items:center;padding:calc(var(--font-size-base)*.6) 0;border-bottom:1px solid var(--border)}
+#pi0-dims .pd-shape {display:flex;flex-wrap:wrap;align-items:center;gap:calc(var(--font-size-base)*.4)}
+#pi0-dims .pd-dimension {display:inline-flex;align-items:center;justify-content:center;padding:calc(var(--font-size-base)*.3);background:color-mix(in srgb,var(--viz-series-1) 12%,transparent);color:var(--foreground)}
+#pi0-dims .pd-arrow {color:var(--muted-foreground)}
+#pi0-dims summary {color:var(--foreground)}
+@media(max-width:460px){#pi0-dims .pd-stage{grid-template-columns:1fr}}
+</style>
+<script>
+(function(){
+ const root=document.getElementById('pi0-dims');
+ const defaults={b:2,h:4,a:7,d:1024,mode:'input'};
+ let state={...defaults};
+ const q=id=>root.querySelector('#'+id);
+ const fmt=n=>n.toLocaleString('en-US');
+ const shape=xs=>'<span class="pd-shape">'+xs.map(x=>'<span class="pd-dimension tabular-nums">'+x+'</span>').join('<span>×</span>')+'</span>';
+ function draw(){
+  const {b,h,a,d,mode}=state, adaptive=mode==='adaptive', t=adaptive?256:d;
+  const stages=[
+   ['带噪声动作 · action / ψₜ',shape([b,h,a])],
+   ['↓ linear_1：A → D',shape([b,h,d])],
+   ['时间 t → SinusoidalPosEmb',shape([b])+'<span class="pd-arrow"> → </span>'+shape([b,t])],
+   adaptive?['时间条件 → joint_model 自适应层',shape([b,t])]:['时间扩展 H 次，再与动作特征拼接',shape([b,h,2*d])],
+   ['↓ linear_2 → SiLU → linear_3',shape([b,h,d])],
+   ['↓ joint_model（结合图文和状态）',shape([b,h,d])],
+   ['↓ action_decoder：D → A',shape([b,h,a])],
+   ['速度场 v → action += Δt × v',shape([b,h,a])]
+  ];
+  q('pd-flow').innerHTML=stages.map(([name,s])=>'<div class="pd-stage"><span>'+name+'</span><div class="pd-shape">'+s+'</div></div>').join('');
+  q('pd-legend').textContent='B = '+b+' 个样本　H = '+h+' 步　A = '+a+' 个数/步　D = '+d+' 个特征/步';
+  q('pd-proprio').textContent='['+b+', 1, 7]';q('pd-state').textContent='['+b+', 1, 1024]';
+  const n=adaptive?d:2*d;
+  const rows=[['action_encoder.linear_1',[d,a],d*a+d],['action_encoder.linear_2',[d,n],d*n+d],['action_encoder.linear_3',[d,d],d*d+d],['action_decoder',[a,d],a*d+a],['SinusoidalPosEmb',null,0]];
+  q('pd-weights').innerHTML=rows.map(([name,dims,count])=>'<tr><td>'+name+'</td><td>'+(dims?'['+dims.join(', ')+']':'无可训练权重')+'</td><td class="text-end tabular-nums">'+fmt(count)+'</td></tr>').join('');
+  q('pd-total').textContent=fmt(rows.reduce((sum,r)=>sum+r[2],0));
+  root.querySelectorAll('[data-key]').forEach(el=>{el.value=String(state[el.dataset.key]);});
+ }
+ function restore(saved){const s=saved?.modelContent?.dimensions;if(!s)return;for(const key of Object.keys(defaults)){const el=root.querySelector('[data-key="'+key+'"]');if(Array.from(el.options).some(o=>o.value===String(s[key])))state[key]=key==='mode'?s[key]:Number(s[key]);}draw();}
+ root.querySelectorAll('[data-key]').forEach(el=>el.addEventListener('change',()=>{const key=el.dataset.key;state[key]=key==='mode'?el.value:Number(el.value);draw();if(window.openai?.setWidgetState)window.openai.setWidgetState({modelContent:{dimensions:state},privateContent:null}).catch(()=>{});}));
+ draw();restore(window.openai?.widgetState);
+ window.addEventListener('openai:set_globals',event=>restore(event.detail?.globals?.widgetState));
+})();
+</script>
