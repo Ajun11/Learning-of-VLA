@@ -1,0 +1,106 @@
+<div id="pi0-atlas">
+  <div class="pa-heading"><div><div class="text-small text-muted">PI ZERO / 动作分支</div><h2>7 个动作数，怎样变成 1024 维特征？</h2></div></div>
+  <div class="viz-row" aria-label="选择查看的模块">
+    <button class="btn" data-stage="encode" aria-pressed="true">① 动作编码</button>
+    <button class="btn" data-stage="time" aria-pressed="false">② 加入时间</button>
+    <button class="btn" data-stage="decode" aria-pressed="false">③ 预测变化速度</button>
+  </div>
+  <div id="pa-art" role="img" aria-label="动作张量与特征张量的维度转换示意图"></div>
+  <div id="pa-detail" aria-live="polite"></div>
+  <div class="viz-controls">
+    <label class="form-label">B · 同时看几个样本<select class="form-select" data-field="b"><option value="1">1 个样本</option><option value="2" selected>2 个样本</option></select></label>
+    <label class="form-label">H · 每个样本预测几步<select class="form-select" data-field="h"><option value="4" selected>4 步动作</option><option value="8">8 步动作</option></select></label>
+  </div>
+  <div class="pa-footer text-small text-muted">bridge.yaml：A = 7 · D = 1024 · 默认 π₀ 分支（time_cond=True）· 特征列为压缩示意</div>
+</div>
+<style>
+#pi0-atlas{display:flex;flex-direction:column;gap:calc(var(--font-size-base)*1.1);color:var(--foreground)}
+#pi0-atlas .pa-heading{padding-right:90px}
+#pi0-atlas #pa-art{width:100%;background:radial-gradient(ellipse at 72% 45%,color-mix(in srgb,var(--viz-series-1) 7%,transparent),transparent 70%)}
+#pi0-atlas svg{display:block;width:100%;overflow:visible}
+#pi0-atlas svg text{font-family:inherit;fill:var(--foreground);font-weight:400}
+#pi0-atlas svg .pa-muted{fill:var(--muted-foreground)}
+#pi0-atlas svg .pa-grid{stroke:color-mix(in srgb,var(--foreground) 14%,var(--background));stroke-width:.7;vector-effect:non-scaling-stroke}
+#pi0-atlas #pa-detail{min-height:calc(var(--font-size-base)*3);border-left:3px solid var(--viz-series-1);padding-left:calc(var(--font-size-base)*.8)}
+#pi0-atlas .pa-footer{border-top:1px solid var(--border);padding-top:calc(var(--font-size-base)*.7)}
+@media(max-width:480px){#pi0-atlas .pa-heading{padding-right:0}}
+</style>
+<script>
+(()=>{
+const root=document.getElementById('pi0-atlas');
+const art=root.querySelector('#pa-art');
+let state={stage:'encode',b:2,h:4};
+const ns='http://www.w3.org/2000/svg';
+const C='var(--viz-series-1)', C2='var(--viz-series-2)', F='var(--foreground)', M='var(--muted-foreground)', BG='var(--background)';
+function el(tag,attrs={},text){const n=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))n.setAttribute(k,String(v));if(text!==undefined)n.textContent=text;return n;}
+function add(parent,tag,a,t){const n=el(tag,a,t);parent.appendChild(n);return n;}
+function text(p,x,y,t,anchor='start',muted=false){return add(p,'text',{x,y,'text-anchor':anchor,...(muted?{class:'pa-muted'}:{})},t);}
+function line(p,x1,y1,x2,y2,stroke=M){return add(p,'line',{x1,y1,x2,y2,stroke,'stroke-width':1});}
+function sheet(p,x,y,width,rows,cols,color,sample,caption){
+ const g=add(p,'g',{transform:`translate(${x},${y})`});
+ const cellH=19, height=rows*cellH;
+ text(g,0,-16,sample);
+ add(g,'path',{d:`M0 0H${width}V${height}H0Z`,fill:BG,stroke:'var(--border)','stroke-width':1});
+ for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+  const gap=3,cw=(width-12)/cols;
+  const opacity=.22+((r*7+c*3)%9)*.065;
+  add(g,'rect',{x:6+c*cw+gap/2,y:r*cellH+4,width:Math.max(1,cw-gap),height:11,fill:color,'fill-opacity':opacity});
+ }
+ for(let r=1;r<rows;r++)line(g,0,r*cellH,width,r*cellH,'var(--border)');
+ text(g,width/2,height+23,caption,'middle');
+ return height;
+}
+function tensor(svg,x,y,w,kind){
+ const {b,h}=state;
+ const narrow=w<210;
+ const titles={action:'带噪声动作',hidden:'动作特征',joined:'动作特征 ＋ 时间',velocity:'动作变化速度'};
+ const dims={action:7,hidden:1024,joined:2048,velocity:7};
+ const colors={action:C,hidden:C,joined:C2,velocity:C};
+ text(svg,x,y,titles[kind]);
+ text(svg,x,y+25,`[ ${b}, ${h}, ${dims[kind]} ]`);
+ let cursor=y+63;
+ for(let i=0;i<b;i++){
+  const cols=(kind==='action'||kind==='velocity')?7:18;
+  const caption=(kind==='action'||kind==='velocity')?'每行 7 个数':kind==='joined'?'1024 动作 ＋ 1024 时间':'每行 1024 个特征';
+  sheet(svg,x,cursor,w,h,cols,colors[kind],`样本 ${i+1} · ${h} 行 = ${h} 步`,caption);
+  if(kind==='joined'){
+   add(svg,'rect',{x:x+w/2,y:cursor,width:w/2,height:h*19,fill:C2,'fill-opacity':.14});
+   line(svg,x+w/2,cursor,x+w/2,cursor+h*19,F);
+  }
+  cursor+=h*19+69;
+ }
+ return cursor;
+}
+function draw(){
+ const width=Math.max(280,Math.floor(art.getBoundingClientRect().width));
+ const small=width<600;
+ const {stage,b,h}=state;
+ const left=stage==='decode'?'hidden':'action';
+ const right=stage==='decode'?'velocity':stage==='time'?'joined':'hidden';
+ const objectW=small?Math.min(width-48,260):(width-170)/2;
+ const objectH=63+b*(h*19+69);
+ const height=small?objectH*2+108:objectH+28;
+ const svg=el('svg',{viewBox:`0 0 ${width} ${height}`,height,role:'img','aria-label':`${b} 个样本，每个样本 ${h} 步；${stage==='decode'?'1024 维特征映射到 7 维速度':stage==='time'?'动作与时间特征拼接为 2048 维':'每步 7 个动作数映射为 1024 维特征'}`});
+ const defs=add(svg,'defs');const marker=add(defs,'marker',{id:'pa-arrowhead',viewBox:'0 0 10 10',refX:8,refY:5,markerWidth:8,markerHeight:8,orient:'auto'});add(marker,'path',{d:'M1 1L8 5 1 9',fill:'none',stroke:M,'stroke-width':1.2});
+ const x=small?(width-objectW)/2:10;
+ tensor(svg,x,28,objectW,left);
+ const rx=small?x:width-objectW-10, ry=small?objectH+112:28;
+ tensor(svg,rx,ry,objectW,right);
+ const label=stage==='encode'?'Linear 7 → 1024':stage==='time'?'拼接时间向量':'Linear 1024 → 7';
+ if(small){const y=objectH+28;add(svg,'line',{x1:width/2,y1:y-8,x2:width/2,y2:y+48,stroke:M,'marker-end':'url(#pa-arrowhead)'});text(svg,width/2+15,y+20,stage==='time'?'＋ t':'Linear');}
+ else{const cx=width/2,cy=95+(h*19)/2;add(svg,'line',{x1:x+objectW+12,y1:cy,x2:rx-12,y2:cy,stroke:M,'marker-end':'url(#pa-arrowhead)'});text(svg,cx,cy-30,stage==='time'?'＋ 时间 t':stage==='decode'?'输出投影':'输入投影','middle');text(svg,cx,cy+32,stage==='time'?'拼接':stage==='decode'?'1024 → 7':'7 → 1024','middle');if(stage==='time'){text(svg,cx,cy+62,'sin / cos','middle',true);}}
+ art.replaceChildren(svg);
+ const detail={encode:'每一行都是一步动作：7 个输入数经过同一个 Linear 层，变成 1024 个特征。样本数 B、步数 H 都保留。',time:'一个样本只有一个进度 t。它被编码成 1024 维，复制到每一步，再与动作特征拼接。之后 linear_2 将 2048 维映射回 1024 维。',decode:'经过 joint_model 后，每步的 1024 维特征映射回 7 个速度数，用于更新当前带噪声动作。'};
+ root.querySelector('#pa-detail').textContent=detail[stage];
+ root.querySelectorAll('[data-stage]').forEach(btn=>btn.setAttribute('aria-pressed',String(btn.dataset.stage===stage)));
+ root.querySelectorAll('[data-field]').forEach(input=>input.value=String(state[input.dataset.field]));
+}
+function save(){if(window.openai?.setWidgetState)window.openai.setWidgetState({modelContent:{pi0:state},privateContent:null}).catch(()=>{});}
+function restore(s){const v=s?.modelContent?.pi0;if(!v)return;if(['encode','time','decode'].includes(v.stage))state.stage=v.stage;if([1,2].includes(v.b))state.b=v.b;if([4,8].includes(v.h))state.h=v.h;draw();}
+root.querySelectorAll('[data-stage]').forEach(btn=>btn.addEventListener('click',()=>{state.stage=btn.dataset.stage;draw();save();}));
+root.querySelectorAll('[data-field]').forEach(input=>input.addEventListener('change',()=>{state[input.dataset.field]=Number(input.value);draw();save();}));
+new ResizeObserver(draw).observe(art);
+draw();restore(window.openai?.widgetState);
+window.addEventListener('openai:set_globals',e=>restore(e.detail?.globals?.widgetState));
+})();
+</script>
