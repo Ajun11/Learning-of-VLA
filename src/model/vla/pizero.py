@@ -87,17 +87,23 @@ class PiZero(nn.Module, NoSyncBase):
         self.action_hidden_size = cfg.mixture.action.hidden_size
 
         # Action parameterization
-        # 模型先产生随机噪声，再逐步调整它。如果设置为 10，就更新 10 次， glpw
+        # 模型先产生随机噪声，再逐步调整它。如果设置为 10，就更新 10 次， flow matching
         # 随机噪声 → 更新1 → 更新2 → …… → 更新10 → 输出动作序列
         self.num_inference_steps = cfg.num_inference_steps
+        # 类似于action chunk horizon_steps控制未来包括多少步的action
         self.horizon_steps = cfg.horizon_steps
+        # 机器人动作维度
         self.action_dim = cfg.action_dim
+        # 机器人状态有几个步
         self.proprio_dim = cfg.proprio_dim
+        # 控制动作的输出范围，将动作限制到制定范围里
         self.final_action_clip_value = cfg.final_action_clip_value
+        # 控制fm终点要多少噪声：例如真实动作是 2，噪声是 0.5，默认参数下，终点就是：2 + 0.001 × 0.5 = 2.0005
         self.flow_sig_min = cfg.get("flow_sig_min", 0.001)
 
         # text input only
         # 
+        # 这里就是在创建查找表：nn.Embedding：输入 token 编号，查表得到对应的特征向量，这里有5.27亿个参数
         self.embed_tokens = nn.Embedding(
             cfg.vocab_size,
             self.image_text_hidden_size,
@@ -107,6 +113,7 @@ class PiZero(nn.Module, NoSyncBase):
         # Vision
         # 创建视觉编码器和投影层‘
         # 图像 ↓ vision_towe 图像特征 ↓ multi_modal_projecto 得到 维度与文本 embedding 对齐的图像特征
+        # 创建处理图片的两个模块：先提取图片特征，再把特征转换到图文分支需要的维度。
         self.vision_tower = hydra.utils.instantiate(cfg.vision)
         self.multi_modal_projector = hydra.utils.instantiate(cfg.vision_projector)
 
@@ -442,18 +449,24 @@ class PiZero(nn.Module, NoSyncBase):
 
         # text embedding
         # [Batch_Size, Seq_Len, Hidden_Size]
+        # 有几个样本，每个样本几个token，每个token用多大维度的特征向量表示
         inputs_embeds = self.embed_tokens(input_ids)
 
         # image features from siglip and projector
         # [Batch_Size, Channels, Height, Width] -> [Batch_Size, Num_Patches, Embed_Dim] -> [Batch_Size, Num_Patches, Hidden_Size]
+        # 使用视觉编码器和投影，将编码后的图像再投影到指定维度
         selected_image_feature = self.vision_tower(pixel_values)
         image_features = self.multi_modal_projector(selected_image_feature)
 
         # normalize the image features
+        # 获得投影后图像特征的尾部维度实际上就是和文字一样，：每个token用多大维度的特征向量表示，pi 0 是2048
         _, _, embed_dim = image_features.shape
+        # 样本数量，每个样本几个tokens
         bsz, seq_len = input_ids.shape
+        # 对图像的特征数值按照固定比例缩小，向量的形状不会改变
+        # 就是让token对应的特征向量等比例缩小
         scaled_image_features = image_features / (self.image_text_hidden_size**0.5)
-
+        
         # put embedding together - image, text, padding
         final_embedding = torch.full(
             (bsz, seq_len, embed_dim), self.pad_token_id, dtype=dtype, device=device
